@@ -74,9 +74,14 @@ by bbox, so small edits don't refetch. The logic is in `src/lib/signals.ts`
 - A side path or service road running parallel within 12 m of the route could
   in theory contribute a sign.
 - Signals are counted per intersection, even if you turn there.
-- The public Valhalla and Overpass servers are rate limited and can be slow.
-  Each Overpass request is capped at 30 s; on failure or timeout the app falls
-  back to a second Overpass mirror, then shows an error.
+- Overpass requests go through a small Vercel function (`api/overpass.ts`).
+  The public Overpass servers answer browser User-Agents with HTTP 406 and are
+  often overloaded, so the proxy sends an identifying User-Agent, rotates
+  through four mirrors and caches successful answers on Vercel's CDN for a day.
+  In `npm run dev` Vite proxies `/api/overpass` to overpass-api.de directly.
+  If the proxy fails the browser tries two CORS-enabled mirrors, then shows
+  an error. The first query for a new area can take 20 to 60 seconds when the
+  Overpass servers are busy; repeats of the same area are instant.
 
 ## Data sources
 
@@ -92,7 +97,8 @@ src/
   lib/geo.ts          haversine, bearings, local projection, polyline decode (precision 6), projection onto polyline, bbox
   lib/signals.ts      matching, direction filtering, clustering (pure)
   lib/valhalla.ts     route request/parse
-  lib/overpass.ts     query builder, fetch with mirror fallback, bbox cache
+  lib/overpass.ts     query builder, fetch via proxy with mirror fallback, bbox cache
+api/overpass.ts       Vercel function: Overpass proxy with mirror rotation and CDN caching
   lib/nominatim.ts    geocoding
   lib/waypoints.ts    waypoint insertion by nearest leg
   lib/urlState.ts     URL hash (de)serialisation

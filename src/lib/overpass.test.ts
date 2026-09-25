@@ -8,7 +8,7 @@ describe('fetchOverpass timeout', () => {
     const calls: string[] = [];
     const fetchImpl = ((url: string, init?: RequestInit) => {
       calls.push(url);
-      if (url === OVERPASS_ENDPOINTS[0]) {
+      if (url.startsWith(OVERPASS_ENDPOINTS[0]!.url)) {
         // Never resolve; only reject once the per-attempt signal aborts.
         return new Promise<Response>((_, reject) => {
           init?.signal?.addEventListener('abort', () =>
@@ -25,7 +25,10 @@ describe('fetchOverpass timeout', () => {
     }) as unknown as typeof fetch;
 
     const data = await fetchOverpass(bbox, undefined, fetchImpl, 20);
-    expect(calls).toEqual(OVERPASS_ENDPOINTS);
+    expect(calls).toHaveLength(2);
+    // The proxy is queried by GET with the query in the URL, the mirror by POST.
+    expect(calls[0]).toMatch(/^\/api\/overpass\?data=/);
+    expect(calls[1]).toBe(OVERPASS_ENDPOINTS[1]!.url);
     expect(data.nodes).toEqual([]);
   });
 

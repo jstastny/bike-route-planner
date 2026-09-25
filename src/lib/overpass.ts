@@ -1,9 +1,23 @@
 import { type BBox, bboxContains } from './geo';
 import type { OsmData, OsmNode, OsmWay } from './osm';
 
-export const OVERPASS_ENDPOINTS = [
-  'https://overpass-api.de/api/interpreter',
-  'https://overpass.kumi.systems/api/interpreter',
+export interface OverpassEndpoint {
+  url: string;
+  /** GET lets Vercel's CDN cache the proxy response; mirrors are queried by POST. */
+  method: 'GET' | 'POST';
+}
+
+/**
+ * Order matters. The same-origin proxy (api/overpass.ts) goes first: it sends
+ * an identifying User-Agent, rotates mirrors server-side and caches on the CDN.
+ * The direct mirrors are a last resort if the proxy itself is unavailable;
+ * overpass-api.de is deliberately absent because it answers browser
+ * User-Agents with HTTP 406 and no CORS headers.
+ */
+export const OVERPASS_ENDPOINTS: OverpassEndpoint[] = [
+  { url: '/api/overpass', method: 'GET' },
+  { url: 'https://overpass.kumi.systems/api/interpreter', method: 'POST' },
+  { url: 'https://maps.mail.ru/osm/tools/overpass/api/interpreter', method: 'POST' },
 ];
 
 /** Overpass QL for stop signs, signals, signalised crossings and their parent highway ways. */
@@ -67,7 +81,7 @@ export function parseOverpass(json: OverpassResponse): OsmData {
  * request for a long time without answering; without this the UI would sit on
  * "Counting..." forever instead of trying the mirror.
  */
-export const OVERPASS_REQUEST_TIMEOUT_MS = 30_000;
+export const OVERPASS_REQUEST_TIMEOUT_MS = 60_000;
 
 /** Try each Overpass endpoint in turn; throws if all fail. */
 export async function fetchOverpass(
@@ -76,28 +90,39 @@ export async function fetchOverpass(
   fetchImpl: typeof fetch = fetch,
   timeoutMs = OVERPASS_REQUEST_TIMEOUT_MS,
 ): Promise<OsmData> {
-  const body = new URLSearchParams({ data: buildQuery(b) }).toString();
+  const params = new URLSearchParams({ data: buildQuery(b) }).toString();
   const errors: string[] = [];
   for (const endpoint of OVERPASS_ENDPOINTS) {
+    const label = endpoint.url.startsWith('/') ? 'proxy' : new URL(endpoint.url).host;
     // Combine the caller's abort signal with a per-attempt timeout.
     const attempt = new AbortController();
     const onOuterAbort = () => attempt.abort();
     signal?.addEventListener('abort', onOuterAbort, { once: true });
     const timer = setTimeout(() => attempt.abort(), timeoutMs);
     try {
-      const res = await fetchImpl(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body,
-        signal: attempt.signal,
-      });
+      const res =
+        endpoint.method === 'GET'
+          ? await fetchImpl(`${endpoint.url}?${params}`, { method: 'GET', signal: attempt.signal })
+          : await fetchImpl(endpoint.url, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+              body: params,
+              signal: attempt.signal,
+            });
       if (!res.ok) {
-        errors.push(`${new URL(endpoint).host}: HTTP ${res.status}`);
+        let detail = '';
+        try {
+          const err = (await res.json()) as { error?: string };
+          if (err.error) detail = ` (${err.error})`;
+        } catch {
+          /* body was not JSON */
+        }
+        errors.push(`${label}: HTTP ${res.status}${detail}`);
         continue;
       }
       const json = (await res.json()) as OverpassResponse;
       if (json.remark && /runtime error|timed out/i.test(json.remark)) {
-        errors.push(`${new URL(endpoint).host}: ${json.remark}`);
+        errors.push(`${label}: ${json.remark}`);
         continue;
       }
       return parseOverpass(json);
@@ -108,7 +133,7 @@ export async function fetchOverpass(
         : e instanceof Error
           ? e.message
           : String(e);
-      errors.push(`${new URL(endpoint).host}: ${msg}`);
+      errors.push(`${label}: ${msg}`);
     } finally {
       clearTimeout(timer);
       signal?.removeEventListener('abort', onOuterAbort);
