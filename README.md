@@ -1,5 +1,8 @@
 # Bike Route Planner: stop signs & traffic lights
 
+Live: https://bike-route-planner-seven.vercel.app · Source: https://github.com/jstastny/bike-route-planner
+
+
 A single-page web app that plans a **bicycle** route on an OpenStreetMap map
 (default: 2746 Cowper St, Palo Alto to 80 Willow Rd, Menlo Park), lets you shape
 it with waypoints, and **counts the stop signs and traffic lights you will
@@ -96,4 +99,12 @@ src/
   hooks/              useRoute, useTrafficControls, useUrlSync
   components/         MapView, SidePanel, Controls, WaypointList, ResultsList, ManeuverList, icons
   App.tsx
+```
+
+## Deploy
+
+Static Vite site on Vercel (personal scope):
+
+```
+vercel deploy --prod --scope janstastny-4052s-projects
 ```
